@@ -150,14 +150,6 @@ class QuerySQLDataBaseTool(BaseSQLDatabaseTool, BaseTool):
         top_k: int = TOP_K,
         run_manager: CallbackManagerForToolRun | None = None,  # noqa: ARG002
     ) -> str:
-        logger.info(
-            f"**** Executing SQL query in the QuerySQLDataBaseTool: {query}\n")
-        # remove markdown formatting from the query. ```sql from the start and ``` from the end
-        if "```" in query:
-            logger.info(f"**** Removing markdown formatting from the query\n")
-            query = query.replace("```sql", "").replace("```", "")
-            logger.info(
-                f"**** Query after removing markdown formatting: {query}\n")
         """Execute the query, return the results or an error message."""
         if "```sql" in query:
             logger.info("**** Removing markdown formatting from the query\n")
@@ -604,19 +596,11 @@ class DataheraldSQLAgent(SQLGenerator):
             callback_manager=callback_manager,
         )
         tool_names = [tool.name for tool in tools]
-        agent = ZeroShotAgent(llm_chain=llm_chain, allowed_tools=tool_names, **kwargs)
+        agent = ZeroShotAgent(llm_chain=llm_chain,
+                              allowed_tools=tool_names, **kwargs)
         return AgentExecutor.from_agent_and_tools(
             agent=agent,
             tools=tools,
-            llm_list={
-                "short_context_llm": self.short_context_llm,
-                "long_context_llm": self.long_context_llm,
-            },
-            switch_to_larger_model_threshold=OPENAI_CONTEXT_WIDNOW_SIZES[
-                self.short_context_llm.model_name
-            ]
-            - 500,
-            encoding=tiktoken.encoding_for_model(self.short_context_llm.model_name),
             callback_manager=callback_manager,
             verbose=verbose,
             max_iterations=max_iterations,
@@ -673,9 +657,6 @@ class DataheraldSQLAgent(SQLGenerator):
                 model=EMBEDDING_MODEL,
             ),
         )
-        met = os.getenv("DH_ENGINE_TIMEOUT", None)
-        print(f"met: {met}")
-        print(f"typeof met: {type(met)}")
         agent_executor = self.create_sql_agent(
             toolkit=toolkit,
             verbose=True,
@@ -720,7 +701,8 @@ class DataheraldSQLAgent(SQLGenerator):
         intermediate_steps = self.format_intermediate_representations(
             result["intermediate_steps"]
         )
-        logger.info(f"cost: {str(cb.total_cost)} tokens: {str(cb.total_tokens)}")
+        logger.info(
+            f"cost: {str(cb.total_cost)} tokens: {str(cb.total_tokens)}")
         response = Response(
             question_id=user_question.id,
             response=result["output"],
@@ -729,10 +711,6 @@ class DataheraldSQLAgent(SQLGenerator):
             total_cost=cb.total_cost,
             sql_query=sql_query_list[-1] if len(sql_query_list) > 0 else "",
         )
-        logger.info(
-            f"===================== from generate_response =============================")
-        logger.info(f"response: {response}")
-        logger.info(f"==================================================")
         return self.create_sql_query_status(
             self.database,
             response.sql_query,
