@@ -13,13 +13,13 @@ The SQL query MUST have in-line comments to explain what each clause does.
 """  # noqa: E501
 
 PLAN_WITH_FEWSHOT_EXAMPLES_AND_INSTRUCTIONS = """1) Use the fewshot_examples_retriever tool to retrieve a first set of possibly relevant tables and columns and the SQL syntax to use.
-2) Use the db_tables_with_relevance_scores tool to find the a second set of possibly relevant tables.
-3) Use the db_relevant_tables_schema tool to obtain the schema of the both sets of possibly relevant tables to identify the possibly relevant columns.
-4) Use the db_relevant_columns_info tool to gather more information about the possibly relevant columns, filtering them to find the relevant ones.
-5) [Optional based on the question] Use the system_time tool if the question has any mentions of time or dates.
-6) [Optional based on the question] Always use the db_column_entity_checker tool to make sure that relevant columns have the cell-values.
-7) Use the get_admin_instructions tool to retrieve the DB admin instructions before generating the SQL query.
-8) Write a {dialect} query and use sql_db_query tool the Execute the SQL query on the database to obtain the results. 
+2) Use the get_admin_instructions tool to retrieve the DB admin instructions before calling ant other tools, to make sure you follow the instructions when writing the SQL query.
+3) Use the db_tables_with_relevance_scores tool to find the a second set of possibly relevant tables.
+4) Use the db_relevant_tables_schema tool to obtain the schema of the both sets of possibly relevant tables to identify the possibly relevant columns.
+5) Use the db_relevant_columns_info tool to gather more information about the possibly relevant columns, filtering them to find the relevant ones.
+6) [Optional based on the question] Use the system_time tool if the question has any mentions of time or dates.
+7) [Optional based on the question] Always use the db_column_entity_checker tool to make sure that relevant columns have the cell-values.
+8) Write a {dialect} query and use sql_db_query tool the Execute the SQL query on the database to obtain the results.
 #
 Some tips to always keep in mind:
 tip1) For complex questions that has many relevant columns and tables request for more examples of Question/SQL pairs.
@@ -31,12 +31,12 @@ tip6) Remove any markdown formatting from the SQL query before executing it. For
 """  # noqa: E501
 
 PLAN_WITH_INSTRUCTIONS = """1) Use the db_tables_with_relevance_scores tool to find the a set of possibly relevant tables.
+2) Use the get_admin_instructions tool to retrieve the DB admin instructions before calling ant other tools, to make sure you follow the instructions when writing the SQL query.
 2) Use the db_relevant_tables_schema tool to obtain the schema of possibly relevant tables to identify the possibly relevant columns.
-3) Use the db_relevant_columns_info tool to gather more information about the possibly relevant columns, filtering them to find the relevant ones.
-4) [Optional based on the question] Use the system_time tool if the question has any mentions of time or dates.
-5) [Optional based on the question] Always use the db_column_entity_checker tool to make sure that relevant columns have the cell-values.
-6) Use the get_admin_instructions tool to retrieve the DB admin instructions before generating the SQL query.
-7) Write a {dialect} query and use sql_db_query tool the Execute the SQL query on the database to obtain the results. 
+4) Use the db_relevant_columns_info tool to gather more information about the possibly relevant columns, filtering them to find the relevant ones.
+5) [Optional based on the question] Use the system_time tool if the question has any mentions of time or dates.
+6) [Optional based on the question] Always use the db_column_entity_checker tool to make sure that relevant columns have the cell-values.
+7) Write a {dialect} query and use sql_db_query tool the Execute the SQL query on the database to obtain the results.
 #
 Some tips to always keep in mind:
 tip1) If the SQL query resulted in errors, rewrite the SQL query and try again.
@@ -113,13 +113,13 @@ Given an input question, use generate_sql tool to create a syntactically correct
 If the question is complex:
 1) Break the question into sub-questions.
 2) Find the SQL query for each sub-question by using the generate_sql tool for each sub-question.
-3) Combine the SQL queries for each sub-question into a single SQL query.
+3) Combine the SQL queries for each sub-question into a single SQL query by using set operations, sub_uqeires, or nested queries.
 
 Using `current_date()` or `current_datetime()` in SQL queries is banned, use system_time tool to get the exact time of the query execution.
-If running the SQL query results in an error, rewrite the SQL query and try again. You can use db_schema tool to get the schema of the database.
-only rewrite the query when the execution returned an error or it does not follow the instructions provided by the database administrator.
-Only rely on generate_sql tool to generate the SQL query.
+If running the SQL query results in an error, rewrite the SQL query and try again. You can use db_schema tool to get the schema of the database and get_db_table_names tool to get the names of the tables in the database.
+You can only make minor changes to the SQL query generated by the generate_sql tool, when it does not follow the instructions provided by the database administrator or when it results in an error.
 If the question does not seem related to the database, explain why you cannot answer the question.
+For query editing, you do not need to use generate_sql tool, you can edit the SQL query directly.
 
 Here are the database admin instructions, that all queries must follow:
 {admin_instructions}
