@@ -15,7 +15,7 @@ from overrides import override
 
 from dataherald.api import API
 from dataherald.api.types import Query
-from dataherald.config import System
+from dataherald.config import Settings, System
 from dataherald.context_store import ContextStore
 from dataherald.db import DB
 from dataherald.db_scanner import Scanner
@@ -84,18 +84,13 @@ class FastAPI(API):
         return int(time.time_ns())
 
     @override
-    def scan_db(
-        self, scanner_request: ScannerRequest, background_tasks: BackgroundTasks
-    ) -> bool:
+    def scan_db(self, scanner_request: ScannerRequest, background_tasks: BackgroundTasks) -> bool:
         """Takes a db_connection_id and scan all the tables columns"""
         db_connection_repository = DatabaseConnectionRepository(self.storage)
 
-        db_connection = db_connection_repository.find_by_id(
-            scanner_request.db_connection_id
-        )
+        db_connection = db_connection_repository.find_by_id(scanner_request.db_connection_id)
         if not db_connection:
-            raise HTTPException(
-                status_code=404, detail="Database connection not found")
+            raise HTTPException(status_code=404, detail="Database connection not found")
 
         try:
             database = SQLDatabase.get_sql_engine(db_connection)
@@ -110,9 +105,7 @@ class FastAPI(API):
         if scanner_request.table_names:
             for table in scanner_request.table_names:
                 if table not in all_tables:
-                    raise HTTPException(
-                        status_code=404, detail=f"Table named: {table} doesn't exist"
-                    )  # noqa: B904
+                    raise HTTPException(status_code=404, detail=f"Table named: {table} doesn't exist")  # noqa: B904
         else:
             scanner_request.table_names = all_tables
 
@@ -122,9 +115,7 @@ class FastAPI(API):
             TableDescriptionRepository(self.storage),
         )
 
-        background_tasks.add_task(
-            async_scanning, scanner, database, scanner_request, self.storage
-        )
+        background_tasks.add_task(async_scanning, scanner, database, scanner_request, self.storage)
         return True
 
     @override
@@ -149,9 +140,7 @@ class FastAPI(API):
         logger.info(f"Answer question: {user_question.question}")
 
         db_connection_repository = DatabaseConnectionRepository(self.storage)
-        database_connection = db_connection_repository.find_by_id(
-            user_question.db_connection_id
-        )
+        database_connection = db_connection_repository.find_by_id(user_question.db_connection_id)
         response_repository = ResponseRepository(self.storage)
 
         if not database_connection:
@@ -164,8 +153,7 @@ class FastAPI(API):
             )
             return JSONResponse(status_code=404, content=jsonable_encoder(response))
         try:
-            context = context_store.retrieve_context_for_question(
-                user_question)
+            context = context_store.retrieve_context_for_question(user_question)
             start_generated_answer = time.time()
             generated_answer = sql_generation.generate_response(
                 user_question,
@@ -176,26 +164,16 @@ class FastAPI(API):
             logger.info("Starts evaluator...")
             if run_evaluator:
                 evaluator = self.system.instance(Evaluator)
-                confidence_score = evaluator.get_confidence_score(
-                    user_question, generated_answer, database_connection
-                )
+                confidence_score = evaluator.get_confidence_score(user_question, generated_answer, database_connection)
                 generated_answer.confidence_score = confidence_score
         except Exception as e:
-            response = response_repository.insert(
-                Response(
-                    question_id=user_question.id, error_message=str(e), sql_query=""
-                )
-            )
+            response = response_repository.insert(Response(question_id=user_question.id, error_message=str(e), sql_query=""))
             return JSONResponse(
                 status_code=400,
                 content=jsonable_encoder(response),
             )
 
-        if (
-            generate_csv
-            and len(generated_answer.sql_query_result.rows)
-            > MAX_ROWS_TO_CREATE_CSV_FILE
-        ):
+        if generate_csv and len(generated_answer.sql_query_result.rows) > MAX_ROWS_TO_CREATE_CSV_FILE:
             generated_answer.sql_query_result = None
         generated_answer.exec_time = time.time() - start_generated_answer
         response_repository = ResponseRepository(self.storage)
@@ -221,9 +199,7 @@ class FastAPI(API):
         def run_and_catch_exceptions():
             nonlocal result, exception
             if not stop_event.is_set():
-                result = self.answer_question(
-                    run_evaluator, generate_csv, None, user_question
-                )
+                result = self.answer_question(run_evaluator, generate_csv, None, user_question)
 
         thread = threading.Thread(target=run_and_catch_exceptions)
         thread.start()
@@ -242,9 +218,7 @@ class FastAPI(API):
         return result
 
     @override
-    def create_database_connection(
-        self, database_connection_request: DatabaseConnectionRequest
-    ) -> DatabaseConnection:
+    def create_database_connection(self, database_connection_request: DatabaseConnectionRequest) -> DatabaseConnection:
         try:
             db_connection = DatabaseConnection(
                 alias=database_connection_request.alias,
@@ -315,9 +289,7 @@ class FastAPI(API):
             raise HTTPException(status_code=400, detail=str(e)) from e
 
         if not table:
-            raise HTTPException(
-                status_code=404, detail="Scanned database table not found"
-            )
+            raise HTTPException(status_code=404, detail="Scanned database table not found")
 
         try:
             return scanner_repository.update_fields(table, table_description_request)
@@ -325,20 +297,13 @@ class FastAPI(API):
             raise HTTPException(status_code=400, detail=str(e)) from e
 
     @override
-    def list_table_descriptions(
-        self, db_connection_id: str, table_name: str | None = None
-    ) -> list[TableDescription]:
+    def list_table_descriptions(self, db_connection_id: str, table_name: str | None = None) -> list[TableDescription]:
         scanner_repository = TableDescriptionRepository(self.storage)
-        table_descriptions = scanner_repository.find_by(
-            {"db_connection_id": ObjectId(
-                db_connection_id), "table_name": table_name}
-        )
+        table_descriptions = scanner_repository.find_by({"db_connection_id": ObjectId(db_connection_id), "table_name": table_name})
 
         if db_connection_id:
-            db_connection_repository = DatabaseConnectionRepository(
-                self.storage)
-            db_connection = db_connection_repository.find_by_id(
-                db_connection_id)
+            db_connection_repository = DatabaseConnectionRepository(self.storage)
+            db_connection = db_connection_repository.find_by_id(db_connection_id)
             database = SQLDatabase.get_sql_engine(db_connection)
 
             scanner = self.system.instance(Scanner)
@@ -371,8 +336,7 @@ class FastAPI(API):
             raise HTTPException(status_code=400, detail=str(e)) from e
 
         if not result:
-            raise HTTPException(
-                status_code=404, detail="Table description not found")
+            raise HTTPException(status_code=404, detail="Table description not found")
         return result
 
     @override
@@ -398,31 +362,34 @@ class FastAPI(API):
         return result
 
     @override
-    def get_response_file(
-        self, response_id: str, background_tasks: BackgroundTasks
-    ) -> FileResponse:
+    def get_response_file(self, response_id: str, background_tasks: BackgroundTasks) -> FileResponse:
         response_repository = ResponseRepository(self.storage)
         question_repository = QuestionRepository(self.storage)
         db_connection_repository = DatabaseConnectionRepository(self.storage)
         try:
             result = response_repository.find_by_id(response_id)
             question = question_repository.find_by_id(result.question_id)
-            db_connection = db_connection_repository.find_by_id(
-                question.db_connection_id
-            )
+            db_connection = db_connection_repository.find_by_id(question.db_connection_id)
         except InvalidId as e:
             raise HTTPException(status_code=400, detail=str(e)) from e
 
         if not result:
-            raise HTTPException(
-                status_code=404, detail="Question, response, or db_connection not found"
-            )
+            raise HTTPException(status_code=404, detail="Question, response, or db_connection not found")
 
-        s3 = S3()
+        # Check if the file is to be returned from server (locally) or from S3
+        if Settings().only_store_csv_files_locally:
+            file_location = result.csv_file_path
+            # check if the file exists
+            if not os.path.exists(file_location):
+                raise HTTPException(
+                    status_code=404,
+                    detail="CSV file not found. Possibly deleted/removed from server.",
+                )
+        else:
+            s3 = S3()
 
-        file_location = s3.download(
-            result.csv_file_path, db_connection.file_storage)
-        background_tasks.add_task(delete_file, file_location)
+            file_location = s3.download(result.csv_file_path, db_connection.file_storage)
+            background_tasks.add_task(delete_file, file_location)
 
         return FileResponse(
             file_location,
@@ -478,9 +445,7 @@ class FastAPI(API):
         return result
 
     @override
-    def add_golden_records(
-        self, golden_records: List[GoldenRecordRequest]
-    ) -> List[GoldenRecord]:
+    def add_golden_records(self, golden_records: List[GoldenRecordRequest]) -> List[GoldenRecord]:
         """Takes in a list of NL <> SQL pairs and stores them to be used in prompts to the LLM"""
         context_store = self.system.instance(ContextStore)
         return context_store.add_golden_records(golden_records)
@@ -489,12 +454,9 @@ class FastAPI(API):
     def execute_sql_query(self, query: Query) -> tuple[str, dict]:
         """Executes a SQL query against the database and returns the results"""
         db_connection_repository = DatabaseConnectionRepository(self.storage)
-        database_connection = db_connection_repository.find_by_id(
-            query.db_connection_id
-        )
+        database_connection = db_connection_repository.find_by_id(query.db_connection_id)
         if not database_connection:
-            raise HTTPException(
-                status_code=404, detail="Database connection not found")
+            raise HTTPException(status_code=404, detail="Database connection not found")
         database = SQLDatabase.get_sql_engine(database_connection)
         try:
             result = database.run_sql(query.sql_query)
@@ -512,25 +474,20 @@ class FastAPI(API):
     ) -> Response:
         question_repository = QuestionRepository(self.storage)
         response_repository = ResponseRepository(self.storage)
-        user_question = question_repository.find_by_id(
-            query_request.question_id)
+        user_question = question_repository.find_by_id(query_request.question_id)
         if not user_question:
             raise HTTPException(status_code=404, detail="Question not found")
 
         db_connection_repository = DatabaseConnectionRepository(self.storage)
-        database_connection = db_connection_repository.find_by_id(
-            user_question.db_connection_id
-        )
+        database_connection = db_connection_repository.find_by_id(user_question.db_connection_id)
         if not database_connection:
-            raise HTTPException(
-                status_code=404, detail="Database connection not found")
+            raise HTTPException(status_code=404, detail="Database connection not found")
 
         try:
             if not query_request.sql_query:
                 sql_generation = self.system.instance(SQLGenerator)
                 context_store = self.system.instance(ContextStore)
-                context = context_store.retrieve_context_for_question(
-                    user_question)
+                context = context_store.retrieve_context_for_question(user_question)
                 start_generated_answer = time.time()
                 response = sql_generation.generate_response(
                     user_question,
@@ -545,11 +502,8 @@ class FastAPI(API):
                 )
                 start_generated_answer = time.time()
 
-                generates_nl_answer = GeneratesNlAnswer(
-                    self.system, self.storage)
-                response = generates_nl_answer.execute(
-                    response, sql_response_only, generate_csv
-                )
+                generates_nl_answer = GeneratesNlAnswer(self.system, self.storage)
+                response = generates_nl_answer.execute(response, sql_response_only, generate_csv)
         except openai.error.AuthenticationError as e:
             raise HTTPException(status_code=400, detail=str(e)) from e
         except ValueError as e:
@@ -559,14 +513,9 @@ class FastAPI(API):
 
         if run_evaluator:
             evaluator = self.system.instance(Evaluator)
-            confidence_score = evaluator.get_confidence_score(
-                user_question, response, database_connection
-            )
+            confidence_score = evaluator.get_confidence_score(user_question, response, database_connection)
             response.confidence_score = confidence_score
-        if (
-            generate_csv
-            and len(response.sql_query_result.rows) > MAX_ROWS_TO_CREATE_CSV_FILE
-        ):
+        if generate_csv and len(response.sql_query_result.rows) > MAX_ROWS_TO_CREATE_CSV_FILE:
             response.sql_query_result = None
         response.exec_time = time.time() - start_generated_answer
         response_repository.insert(response)
@@ -579,9 +528,7 @@ class FastAPI(API):
         return {"status": status}
 
     @override
-    def get_golden_records(
-        self, db_connection_id: str = None, page: int = 1, limit: int = 10
-    ) -> List[GoldenRecord]:
+    def get_golden_records(self, db_connection_id: str = None, page: int = 1, limit: int = 10) -> List[GoldenRecord]:
         golden_records_repository = GoldenRecordRepository(self.storage)
         if db_connection_id:
             return golden_records_repository.find_by(
@@ -601,9 +548,7 @@ class FastAPI(API):
         return instruction_repository.insert(instruction)
 
     @override
-    def get_instructions(
-        self, db_connection_id: str = None, page: int = 1, limit: int = 10
-    ) -> List[Instruction]:
+    def get_instructions(self, db_connection_id: str = None, page: int = 1, limit: int = 10) -> List[Instruction]:
         instruction_repository = InstructionRepository(self.storage)
         if db_connection_id:
             return instruction_repository.find_by(
@@ -618,8 +563,7 @@ class FastAPI(API):
         instruction_repository = InstructionRepository(self.storage)
         deleted = instruction_repository.delete_by_id(instruction_id)
         if deleted == 0:
-            raise HTTPException(
-                status_code=404, detail="Instruction not found")
+            raise HTTPException(status_code=404, detail="Instruction not found")
         return {"status": "success"}
 
     @override
@@ -631,8 +575,7 @@ class FastAPI(API):
         instruction_repository = InstructionRepository(self.storage)
         instruction = instruction_repository.find_by_id(instruction_id)
         if not instruction:
-            raise HTTPException(
-                status_code=404, detail="Instruction not found")
+            raise HTTPException(status_code=404, detail="Instruction not found")
         updated_instruction = Instruction(
             id=instruction_id,
             instruction=instruction_request.instruction,
