@@ -19,14 +19,21 @@ from dataherald.config import Settings, System
 from dataherald.context_store import ContextStore
 from dataherald.db import DB
 from dataherald.db_scanner import Scanner
-from dataherald.db_scanner.models.types import TableDescription, TableDescriptionStatus
+from dataherald.db_scanner.models.types import (
+    QueryHistory,
+    TableDescription,
+    TableDescriptionStatus,
+)
 from dataherald.db_scanner.repository.base import (
     InvalidColumnNameError,
     TableDescriptionRepository,
 )
+from dataherald.db_scanner.repository.query_history import QueryHistoryRepository
 from dataherald.eval import Evaluator
+from dataherald.finetuning.openai_finetuning import OpenAIFineTuning
 from dataherald.repositories.base import ResponseRepository
 from dataherald.repositories.database_connections import DatabaseConnectionRepository
+from dataherald.repositories.finetunings import FinetuningsRepository
 from dataherald.repositories.golden_records import GoldenRecordRepository
 from dataherald.repositories.instructions import InstructionRepository
 from dataherald.repositories.question import QuestionRepository
@@ -39,8 +46,11 @@ from dataherald.sql_database.models.types import DatabaseConnection
 from dataherald.sql_generator import SQLGenerator
 from dataherald.sql_generator.generates_nl_answer import GeneratesNlAnswer
 from dataherald.types import (
+    CancelFineTuningRequest,
     CreateResponseRequest,
     DatabaseConnectionRequest,
+    Finetuning,
+    FineTuningRequest,
     GoldenRecord,
     GoldenRecordRequest,
     Instruction,
@@ -52,6 +62,7 @@ from dataherald.types import (
     TableDescriptionRequest,
     UpdateInstruction,
 )
+from dataherald.utils.models_context_window import OPENAI_CONTEXT_WIDNOW_SIZES
 from dataherald.utils.s3 import S3
 
 logger = logging.getLogger(__name__)
@@ -65,7 +76,14 @@ def async_scanning(scanner, database, scanner_request, storage):
         scanner_request.db_connection_id,
         scanner_request.table_names,
         TableDescriptionRepository(storage),
+        QueryHistoryRepository(storage),
     )
+
+
+def async_fine_tuning(storage, model):
+    openai_fine_tuning = OpenAIFineTuning(storage, model)
+    openai_fine_tuning.create_fintuning_dataset()
+    openai_fine_tuning.create_fine_tuning_job()
 
 
 def delete_file(file_location: str):
@@ -340,6 +358,13 @@ class FastAPI(API):
         return result
 
     @override
+    def get_query_history(self, db_connection_id: str) -> list[QueryHistory]:
+        query_history_repository = QueryHistoryRepository(self.storage)
+        return query_history_repository.find_by(
+            {"db_connection_id": ObjectId(db_connection_id)}
+        )
+
+    @override
     def get_responses(self, question_id: str | None = None) -> list[Response]:
         response_repository = ResponseRepository(self.storage)
         query = {}
@@ -585,3 +610,91 @@ class FastAPI(API):
         )
         instruction_repository.update(updated_instruction)
         return json.loads(json_util.dumps(updated_instruction))
+
+    @override
+    def create_finetuning_job(
+        self, fine_tuning_request: FineTuningRequest, background_tasks: BackgroundTasks
+    ) -> Finetuning:
+        db_connection_repository = DatabaseConnectionRepository(self.storage)
+
+        db_connection = db_connection_repository.find_by_id(
+            fine_tuning_request.db_connection_id
+        )
+        if not db_connection:
+            raise HTTPException(status_code=404, detail="Database connection not found")
+
+        golden_records_repository = GoldenRecordRepository(self.storage)
+        golden_records = []
+        if fine_tuning_request.golden_records:
+            for golden_record_id in fine_tuning_request.golden_records:
+                golden_record = golden_records_repository.find_by_id(golden_record_id)
+                if not golden_record:
+                    raise HTTPException(
+                        status_code=404, detail="Golden record not found"
+                    )
+                golden_records.append(golden_record)
+        else:
+            golden_records = golden_records_repository.find_by(
+                {"db_connection_id": ObjectId(fine_tuning_request.db_connection_id)},
+                page=0,
+                limit=0,
+            )
+            if not golden_records:
+                raise HTTPException(status_code=404, detail="No golden records found")
+
+        if fine_tuning_request.base_llm.model_name not in OPENAI_CONTEXT_WIDNOW_SIZES:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Model {fine_tuning_request.base_llm.model_name} not supported",
+            )
+
+        model_repository = FinetuningsRepository(self.storage)
+        model = model_repository.insert(
+            Finetuning(
+                db_connection_id=fine_tuning_request.db_connection_id,
+                alias=fine_tuning_request.alias,
+                base_llm=fine_tuning_request.base_llm,
+                golden_records=[
+                    str(golden_record.id) for golden_record in golden_records
+                ],
+            )
+        )
+
+        background_tasks.add_task(async_fine_tuning, self.storage, model)
+
+        return model
+
+    @override
+    def cancel_finetuning_job(
+        self, cancel_fine_tuning_request: CancelFineTuningRequest
+    ) -> Finetuning:
+        model_repository = FinetuningsRepository(self.storage)
+        model = model_repository.find_by_id(cancel_fine_tuning_request.finetuning_id)
+        if not model:
+            raise HTTPException(status_code=404, detail="Model not found")
+
+        if model.status == "succeeded":
+            raise HTTPException(
+                status_code=400, detail="Model has already succeeded. Cannot cancel."
+            )
+        if model.status == "failed":
+            raise HTTPException(
+                status_code=400, detail="Model has already failed. Cannot cancel."
+            )
+        if model.status == "cancelled":
+            raise HTTPException(
+                status_code=400, detail="Model has already been cancelled."
+            )
+
+        openai_fine_tuning = OpenAIFineTuning(self.storage, model)
+
+        return openai_fine_tuning.cancel_finetuning_job()
+
+    @override
+    def get_finetuning_job(self, finetuning_job_id: str) -> Finetuning:
+        model_repository = FinetuningsRepository(self.storage)
+        model = model_repository.find_by_id(finetuning_job_id)
+        if not model:
+            raise HTTPException(status_code=404, detail="Model not found")
+        openai_fine_tuning = OpenAIFineTuning(self.storage, model)
+        return openai_fine_tuning.retrieve_finetuning_job()

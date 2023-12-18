@@ -6,11 +6,14 @@ from fastapi.responses import FileResponse
 
 from dataherald.api.types import Query
 from dataherald.config import Component
-from dataherald.db_scanner.models.types import TableDescription
+from dataherald.db_scanner.models.types import QueryHistory, TableDescription
 from dataherald.sql_database.models.types import DatabaseConnection, SSHSettings
 from dataherald.types import (
+    CancelFineTuningRequest,
     CreateResponseRequest,
     DatabaseConnectionRequest,
+    Finetuning,
+    FineTuningRequest,
     GoldenRecord,
     GoldenRecordRequest,
     Instruction,
@@ -123,6 +126,10 @@ class API(Component, ABC):
         pass
 
     @abstractmethod
+    def get_query_history(self, db_connection_id: str) -> list[QueryHistory]:
+        pass
+
+    @abstractmethod
     def get_responses(self, question_id: str | None = None) -> list[Response]:
         pass
 
@@ -166,4 +173,20 @@ class API(Component, ABC):
         instruction_id: str,
         instruction_request: UpdateInstruction,
     ) -> Instruction:
+        pass
+
+    @abstractmethod
+    def create_finetuning_job(
+        self, fine_tuning_request: FineTuningRequest, background_tasks: BackgroundTasks
+    ) -> Finetuning:
+        pass
+
+    @abstractmethod
+    def cancel_finetuning_job(
+        self, cancel_fine_tuning_request: CancelFineTuningRequest
+    ) -> Finetuning:
+        pass
+
+    @abstractmethod
+    def get_finetuning_job(self, finetuning_job_id: str) -> Finetuning:
         pass
